@@ -983,7 +983,9 @@ curl --location 'http://localhost/compute/cluster' \
 kubectl get rayclusters -n ray
 
 # 3. Access Jupyter
-# Open jupyter_link from create response
+# Get Cluster Dashboards link via below API using cluster_id returned in create_cluster response
+curl --location 'http://localhost/compute/cluster/{cluster_id}/dashboards'
+# Access Jupyter notebook at the returned jupyter_lab_url
 
 # 4. Run a job
 # Submit job via Ray dashboard or SDK
@@ -1024,6 +1026,7 @@ hermes create-serve \
 # 5. Deploy model
 hermes deploy-model \
   --serve-name test-model \
+  --artifact-version v1 \
   --model-uri mlflow-artifacts:/1/abc123/artifacts/model \
   --cores 2 \
   --memory 4 \
