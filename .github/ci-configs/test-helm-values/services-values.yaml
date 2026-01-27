@@ -13,7 +13,6 @@ services:
       enabled: true
       replicaCount: 1
       serviceName: darwin-ci-test-service
-      skipInitContainer: true
       image:
         registry: localhost:5000
         name: ci-test-service
@@ -49,7 +48,7 @@ services:
     # 2. **Override values** from `-f test-helm-values/services-values.yaml` (only ci-test-service defined)
 
     # **If a service is NOT mentioned in the override file, Helm uses the default from base values!**
-    
+
     feature-store:
       enabled: false
     feature-store-admin:
