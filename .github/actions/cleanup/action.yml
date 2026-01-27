@@ -68,7 +68,13 @@ runs:
         SERVICE_NAME="${{ inputs.service_name }}"
         echo "🧹 Cleaning up images for service: $SERVICE_NAME..."
         
-        # Remove specific service images by name
+        # Use label-based cleanup to remove all images (application + runtime) for this service
+        # This catches both application images (e.g., ml-serve-app:latest) and runtime images (e.g., serve-md-runtime:latest)
+        echo "  Removing images labeled with darwin.service=$SERVICE_NAME..."
+        docker image prune -af --filter "label=darwin.service=$SERVICE_NAME" || true
+        
+        # Also remove by name pattern for backward compatibility and images without labels
+        echo "  Removing images by name pattern: $SERVICE_NAME..."
         docker rmi -f "$SERVICE_NAME:latest" 2>/dev/null || true
         docker rmi -f "localhost:5000/$SERVICE_NAME:latest" 2>/dev/null || true
         

@@ -12,6 +12,7 @@ jobs:
   cleanup:
     name: Final Cleanup
     runs-on: [self-hosted, Linux, X64, darwin]
+    timeout-minutes: 20
     # Always run cleanup, regardless of triggering workflow's success/failure
     if: always()
 

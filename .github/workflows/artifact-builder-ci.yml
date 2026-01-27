@@ -85,8 +85,9 @@ jobs:
     name: Deployment & Health Check
     runs-on: [self-hosted, Linux, X64, darwin]
     needs: [lint, unit-tests]
+    timeout-minutes: 30
     env:
-      KUBECONFIG: ./kind/config/kindkubeconfig.yaml
+      KUBECONFIG: ./.setup/kindkubeconfig.yaml
 
     steps:
       - name: Checkout repository
@@ -101,7 +102,7 @@ jobs:
       - name: Setup cluster
         uses: ./.github/actions/setup-cluster
         with:
-          kubeconfig_path: ./kind/config/kindkubeconfig.yaml
+          kubeconfig_path: ./.setup/kindkubeconfig.yaml
 
       - name: Initialize configuration
         run: |
@@ -114,8 +115,7 @@ jobs:
       - name: Build and setup
         run: |
           echo "🔨 Running setup.sh..."
-          export ENV=local
-          ./setup.sh -y
+          ./setup.sh -y -d
 
       - name: Deploy services
         run: |
@@ -269,7 +269,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, darwin]
     needs: [deploy-and-healthcheck]
     env:
-      KUBECONFIG: ./kind/config/kindkubeconfig.yaml
+      KUBECONFIG: ./.setup/kindkubeconfig.yaml
 
     steps:
       - name: Checkout repository

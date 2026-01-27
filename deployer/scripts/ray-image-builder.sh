@@ -15,7 +15,14 @@ PLATFORM="${PLATFORM:-$DEFAULT_PLATFORM}"
 while getopts n:p:P:r:h flag
 do
     case "${flag}" in
-        n) IMAGE_NAME=${OPTARG};;
+        n) 
+            IMAGE_NAME=${OPTARG}
+            case "$IMAGE_NAME" in
+                ray:*)   SERVICE_NAME="darwin-compute" ;;
+                serve-*) SERVICE_NAME="ml-serve-app"   ;;
+                *)       SERVICE_NAME="${IMAGE_NAME%%:*}" ;;
+            esac
+            ;;
         p) DOCKERFILE_PATH=${OPTARG};;
         P) PLATFORM=${OPTARG};;
         r) REGISTRY=${OPTARG};;
@@ -61,9 +68,6 @@ echo "  Image name: $IMAGE_NAME"
 echo "  Dockerfile path: $DOCKERFILE_PATH"
 echo "  Platform: $PLATFORM (detected arch: $ARCH)"
 echo "  Registry: $REGISTRY"
-
-# Extract service name from image name (e.g., "serve-md-runtime:latest" -> "serve-md-runtime")
-SERVICE_NAME="${IMAGE_NAME%%:*}"
 
 # Build the Docker image
 docker build \

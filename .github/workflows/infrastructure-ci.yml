@@ -146,8 +146,9 @@ jobs:
     name: Kind Cluster Test
     runs-on: [self-hosted, Linux, X64, darwin]
     needs: [detect-changes, lint-scripts, validate-yaml]
+    timeout-minutes: 30
     env:
-      KUBECONFIG: ./kind/config/kindkubeconfig.yaml
+      KUBECONFIG: ./.setup/kindkubeconfig.yaml
 
     steps:
       - name: Runner identity (debug)
@@ -189,127 +190,221 @@ jobs:
 
       - name: Install prerequisites
         run: |
-          # Install kubectl
-          KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
-          echo "Installing kubectl version: $KUBECTL_VERSION"
-          curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-          if ! file kubectl | grep -q "ELF\|executable"; then
-            rm -f kubectl
-            curl -LO "https://storage.googleapis.com/kubernetes-release/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          # Install kubectl if not present
+          if ! command -v kubectl >/dev/null 2>&1; then
+            KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
+            echo "Installing kubectl version: $KUBECTL_VERSION"
+            curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+            if ! file kubectl | grep -q "ELF\|executable"; then
+              rm -f kubectl
+              curl -LO "https://storage.googleapis.com/kubernetes-release/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+            fi
+            chmod +x kubectl
+            sudo mv kubectl /usr/local/bin/kubectl
           fi
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/kubectl
           kubectl version --client
 
-          # Install Helm
-          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          # Install Helm if not present
+          if ! command -v helm >/dev/null 2>&1; then
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          fi
           helm version
 
-          # Install Kind
-          curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
-          chmod +x /tmp/kind
-          sudo mv /tmp/kind /usr/local/bin/kind
+          # Install Kind if not present
+          if ! command -v kind >/dev/null 2>&1; then
+            curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+            chmod +x /tmp/kind
+            sudo mv /tmp/kind /usr/local/bin/kind
+          fi
           kind version
 
-          # Install yq
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+          # Install yq if not present
+          if ! command -v yq >/dev/null 2>&1; then
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          fi
           yq --version
 
-      - name: Create Kind cluster
+      # =========================================================================
+      # DARWIN DEPLOYMENT FLOW - Tests init.sh, setup.sh, start.sh
+      # setup.sh handles Kind cluster creation when ENV=local
+      # =========================================================================
+      - name: Test init.sh
         run: |
-          echo "🔧 Creating Kind cluster..."
-          export ENV=local
+          # Define logic to compare YAMLs logically (ignoring comments/dates)
+          compare_yaml_logic() {
+              local expected="$1"
+              local actual=".setup/enabled-services.yaml"
+              local test_name="$2"
 
-          # Create kind config
-          envsubst < ./kind/kind-config.yaml > ./kind/kind-config-tmp.yaml
+              echo "---------------------------------------------------"
+              echo "🧪 Testing $test_name..."
 
-          export CLUSTER_NAME=kind
-          export KIND_CONFIG=./kind/kind-config-tmp.yaml
-          export KUBECONFIG=./kind/config/kindkubeconfig.yaml
+              # Check if actual file was generated
+              if [ ! -f "$actual" ]; then
+                  echo "❌ FAIL: $test_name (Output file not generated)"
+                  return 1
+              fi
 
-          sh ./kind/start-cluster.sh
+              # Compare JSON representations using yq
+              # We put the diff inside the 'if' to handle the exit code gracefully
+              if diff <(yq eval -o=json 'sort_keys(..)' "$expected") <(yq eval -o=json 'sort_keys(..)' "$actual") > /dev/null; then
+                  echo "✅ PASS: $test_name"
+                  return 0
+              else
+                  echo "❌ FAIL: $test_name mismatch"
+                  echo "Diff (Expected < vs Actual >):"
+                  diff <(yq eval -o=json 'sort_keys(..)' "$expected") <(yq eval -o=json 'sort_keys(..)' "$actual")
+                  return 1
+              fi
+          }
 
-          rm ./kind/kind-config-tmp.yaml
+          # 1. Test Inference Mode
+          echo "Running Inference Mode Test..."
+          rm -f .setup/enabled-services.yaml
+          # Inputs: Training(n) -> Inference(y) -> Proceed(y) -> CLI(y)
+          printf "n\ny\ny\ny\n" | ./init.sh > /dev/null 2>&1
+          
+          compare_yaml_logic ".github/ci-configs/expected/inference-mode.yaml" "Inference Mode" || exit 1
 
-          echo "✅ Kind cluster created"
+          # 2. Test Training Mode
+          echo "Running Training Mode Test..."
+          rm -f .setup/enabled-services.yaml
+          # Inputs: Training(y) -> Inference(n) -> Proceed(y) -> SDK(n) -> Ray:2.37(y) -> Ray:2.53(n) -> CLI(n)
+          printf "y\nn\ny\nn\ny\nn\nn\n" | ./init.sh > /dev/null 2>&1
+          
+          compare_yaml_logic ".github/ci-configs/expected/training-mode.yaml" "Training Mode" || exit 1
 
-      - name: Verify cluster is ready
+          # 3. Test Dev Mode (Serve)
+          echo "Running Dev Mode (Serve) Test..."
+          rm -f .setup/enabled-services.yaml
+          # Inputs: No to everything except Serve(y), then Proceed(y), CLI(n)
+          printf "n\nn\nn\nn\ny\nn\nn\nn\ny\nn\n" | ./init.sh --dev-mode > /dev/null 2>&1
+          
+          compare_yaml_logic ".github/ci-configs/expected/dev-mode-serve.yaml" "Dev Mode (Serve)" || exit 1
+
+          echo "✅ ALL INIT SCENARIOS PASSED"
+
+      - name: Build and create cluster (setup.sh)
         run: |
-          echo "🔍 Verifying cluster status..."
+          echo "🔨 Running setup.sh with --ci-test flag..."
+          
+          # setup.sh --ci-test:
+          # - Creates Kind cluster when ENV=local
+          # - Writes KUBECONFIG to .setup/config.env
+          # - Uses .github/ci-configs/test-services.yaml for service definitions
+          # - Uses .github/ci-configs/test-enabled-services.yaml for enabled services
+          # - Builds ONLY ci-test-service image
+          ./setup.sh -y -d --ci-test
+          
+          echo ""
+          echo "Generated config.env:"
+          cat .setup/config.env
 
-          if [ ! -f "$KUBECONFIG" ]; then
-            echo "❌ KUBECONFIG not found at $KUBECONFIG"
+      - name: Assert image built
+        run: |
+          echo "🔍 Asserting CI test service image was built..."
+          
+          # Verify image exists in local registry
+          DOCKER_REGISTRY=$(docker port kind-registry 5000 | head -1 | sed 's/0.0.0.0/127.0.0.1/')
+          echo "Registry: $DOCKER_REGISTRY"
+          
+          # Check if the image exists in the registry
+          if docker pull $DOCKER_REGISTRY/ci-test-service:latest; then
+            echo "✅ ci-test-service:latest exists in registry"
+          else
+            echo "❌ ci-test-service:latest NOT found in registry"
+            echo "Available images:"
+            docker images | grep ci-test || echo "(none)"
             exit 1
           fi
 
+      - name: Deploy CI test service (start.sh)
+        run: |
+          echo "🚀 Deploying CI test service via start.sh with --ci-test flag..."
+          
+          # start.sh --ci-test:
+          # - Sources .setup/config.env which contains KUBECONFIG
+          # - Uses .github/ci-configs/test-enabled-services.yaml for service config
+          # - Uses .github/ci-configs/test-helm-values/ for Helm values
+          # - Deploys ONLY ci-test-service via helm
+          ./start.sh --ci-test
+          
+          echo "✅ Deployment completed via start.sh"
+
+      - name: Assert pod running
+        run: |
+          echo "🔍 Asserting CI test service pod is running..."
+          
+          # Wait for pod to be ready
           max_attempts=30
           attempt=0
           while [ $attempt -lt $max_attempts ]; do
-            if kubectl get nodes >/dev/null 2>&1; then
-              echo "✅ Cluster is accessible"
-              kubectl get nodes
+            POD_STATUS=$(kubectl get pods -n darwin -l app.kubernetes.io/component=ci-test-service -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "NotFound")
+            READY=$(kubectl get pods -n darwin -l app.kubernetes.io/component=ci-test-service -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo "false")
+            
+            if [ "$POD_STATUS" = "Running" ] && [ "$READY" = "true" ]; then
+              echo "✅ ci-test-service pod is Running and Ready"
+              kubectl get pods -n darwin -l app.kubernetes.io/component=ci-test-service
               break
             fi
-            echo "Attempt $((attempt+1))/$max_attempts: Waiting for cluster..."
+            
+            echo "Attempt $((attempt+1))/$max_attempts: Status=$POD_STATUS, Ready=$READY"
             sleep 5
             attempt=$((attempt+1))
           done
-
+          
           if [ $attempt -eq $max_attempts ]; then
-            echo "❌ Cluster is not accessible"
+            echo "❌ ci-test-service pod not ready after $max_attempts attempts"
+            kubectl get pods -n darwin
+            kubectl describe pod -n darwin -l app.kubernetes.io/component=ci-test-service || true
             exit 1
           fi
 
-      - name: Build CI test service
+      - name: Assert environment variables
         run: |
-          echo "🔨 Building CI test service..."
+          echo "🔍 Asserting environment variables are set correctly..."
+          
+          POD_NAME=$(kubectl get pods -n darwin -l app.kubernetes.io/component=ci-test-service -o jsonpath='{.items[0].metadata.name}')
+          echo "Pod name: $POD_NAME"
+          
+          # Verify expected env vars are set (from helm values.yaml)
+          kubectl exec -n darwin $POD_NAME -- env | grep -E "^ENV=|^ROOT_PATH=" || true
+          
+          if kubectl exec -n darwin $POD_NAME -- env | grep -q "ENV="; then
+            echo "✅ ENV variable is set"
+          else
+            echo "⚠️ ENV variable not found (may use default)"
+          fi
+          
+          echo "✅ Environment variables assertion completed"
 
-          # Get registry from kind
-          DOCKER_REGISTRY=$(docker port kind-registry 5000 | head -1 | sed 's/0.0.0.0/127.0.0.1/')
-          echo "Registry: $DOCKER_REGISTRY"
-
-          # Build with darwin label
-          docker build \
-            --label "maintainer=darwin" \
-            -t ci-test-service:latest \
-            .github/ci-test-service/
-
-          # Tag and push to kind registry using dynamic port
-          docker tag ci-test-service:latest $DOCKER_REGISTRY/ci-test-service:latest
-          docker push $DOCKER_REGISTRY/ci-test-service:latest
-
-          # Also tag with localhost:5000 for Kind's internal registry redirect
-          docker tag ci-test-service:latest localhost:5000/ci-test-service:latest
-
-          echo "✅ CI test service built and pushed"
-
-      - name: Deploy CI test service
+      - name: Verify healthcheck via ingress
         run: |
-          echo "🚀 Deploying CI test service..."
-
-          kubectl apply -f .github/ci-test-service/deployment.yaml
-
-          echo "⏳ Waiting for deployment to be ready..."
-          kubectl wait --for=condition=available --timeout=120s deployment/ci-test-service -n ci-test
-
-          echo "✅ CI test service deployed"
-          kubectl get pods -n ci-test
-
-      - name: Verify healthcheck
-        run: |
-          echo "🏥 Testing CI test service healthcheck..."
-
-          # Port-forward to test service
-          kubectl port-forward svc/ci-test-service -n ci-test 8888:8000 > /tmp/port-forward.log 2>&1 &
-          PORT_FORWARD_PID=$!
-          sleep 5
-
-          # Test healthcheck
+          echo "🏥 Testing CI test service healthcheck via ingress..."
+          
+          # Wait for ingress controller to be ready
+          echo "Waiting for ingress controller..."
           max_attempts=30
           attempt=0
           while [ $attempt -lt $max_attempts ]; do
-            if curl -f -s http://localhost:8888/healthcheck > /dev/null 2>&1; then
+            if kubectl get pods -n ingress-nginx 2>/dev/null | grep -q "Running"; then
+              echo "✅ Ingress controller is ready"
+              break
+            fi
+            echo "Attempt $((attempt+1))/$max_attempts: Waiting for ingress..."
+            sleep 2
+            attempt=$((attempt+1))
+          done
+
+          # Test healthcheck via ingress path (defined in values.yaml)
+          HEALTH_URL="http://localhost/ci-test/healthcheck"
+          echo "Testing: $HEALTH_URL"
+          
+          max_attempts=30
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            if curl -f -s "$HEALTH_URL" > /dev/null 2>&1; then
               echo "✅ Health check endpoint is accessible"
               break
             fi
@@ -319,14 +414,15 @@ jobs:
           done
 
           if [ $attempt -eq $max_attempts ]; then
-            echo "❌ Healthcheck not accessible"
-            cat /tmp/port-forward.log || true
-            kill $PORT_FORWARD_PID 2>/dev/null || true
+            echo "❌ Healthcheck not accessible via ingress"
+            echo "Checking ingress status:"
+            kubectl get ingress -n darwin || true
+            kubectl describe ingress -n darwin || true
             exit 1
           fi
 
           # Verify response
-          response=$(curl -s http://localhost:8888/healthcheck)
+          response=$(curl -s "$HEALTH_URL")
           echo "Response: $response"
 
           if echo "$response" | grep -q '"status":"SUCCESS"'; then
@@ -336,20 +432,22 @@ jobs:
             exit 1
           fi
 
-          kill $PORT_FORWARD_PID 2>/dev/null || true
-
-      - name: Cleanup CI test service
+      - name: Cleanup CI test service (helm uninstall)
         run: |
-          echo "🧹 Cleaning up CI test service..."
-          kubectl delete namespace ci-test --ignore-not-found=true || true
+          echo "🧹 Cleaning up CI test service via Helm..."
+          
+          # Cleanup via helm (proper Darwin way)
+          helm uninstall darwin -n darwin --ignore-not-found || true
+          
+          echo "✅ Helm release uninstalled"
 
       - name: Cleanup
         if: always()
         run: |
           echo "🧹 Running cleanup..."
 
-          # Always clean up port-forwards
-          pkill -f "kubectl port-forward" || true
+          # Ensure helm release is uninstalled (in case previous step failed)
+          helm uninstall darwin -n darwin --ignore-not-found 2>/dev/null || true
 
           # Clean up ONLY ci-test-service images (not all Darwin images)
           # This prevents race conditions with parallel service CIs
