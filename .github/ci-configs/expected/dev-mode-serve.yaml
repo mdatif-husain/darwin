@@ -22,8 +22,8 @@ applications:
   darwin-catalog: false
 
 ray-images:
-  "ray:2.37.0": false
-  "ray:2.53.0": false
+  "ray-2.37.0:latest": false
+  "ray-2.53.0:latest": false
 
 serve-images:
   "serve-md-runtime:latest": true  # (auto-enabled with ml-serve-app)
