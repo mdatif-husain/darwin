@@ -109,7 +109,7 @@ jobs:
           echo "📋 Running init.sh..."
           rm -f .setup/enabled-services.yaml
           # Enable Serve only (ml-serve-app + artifact-builder)
-          printf "n\nn\nn\nn\ny\nn\nn\nn\ny\nn\n" | ./init.sh
+          printf "n\nn\nn\nn\ny\nn\nn\nn\ny\nn\n" | ./init.sh --dev-mode
           cat .setup/enabled-services.yaml
 
       - name: Build and setup
