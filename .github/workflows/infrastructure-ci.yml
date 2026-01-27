@@ -231,14 +231,9 @@ jobs:
       # =========================================================================
       - name: Test init.sh
         run: |
-          # Verify yq is available
-          if ! command -v yq >/dev/null 2>&1; then
-            echo "❌ yq command not found!"
-            echo "Installing yq..."
-            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-            sudo chmod +x /usr/local/bin/yq
-          fi
-          echo "✅ yq version: $(yq --version)"
+          # Ensure yq is in the PATH and executable
+          export PATH=$PATH:/usr/local/bin
+          chmod +x ./init.sh
 
           # Define logic to compare YAMLs logically (ignoring comments/dates)
           compare_yaml_logic() {
@@ -272,7 +267,7 @@ jobs:
           echo "Running Inference Mode Test..."
           rm -f .setup/enabled-services.yaml
           # Inputs: Training(n) -> Inference(y) -> Proceed(y) -> CLI(y)
-          printf "n\ny\ny\ny\n" | ./init.sh > /dev/null 2>&1
+          printf "n\ny\ny\ny\n" | ./init.sh
           
           compare_yaml_logic ".github/ci-configs/expected/inference-mode.yaml" "Inference Mode" || exit 1
 
@@ -280,7 +275,7 @@ jobs:
           echo "Running Training Mode Test..."
           rm -f .setup/enabled-services.yaml
           # Inputs: Training(y) -> Inference(n) -> Proceed(y) -> SDK(n) -> Ray:2.37(y) -> Ray:2.53(n) -> CLI(n)
-          printf "y\nn\ny\nn\ny\nn\nn\n" | ./init.sh > /dev/null 2>&1
+          printf "y\nn\ny\nn\ny\nn\nn\n" | ./init.sh
           
           compare_yaml_logic ".github/ci-configs/expected/training-mode.yaml" "Training Mode" || exit 1
 
@@ -288,7 +283,7 @@ jobs:
           echo "Running Dev Mode (Serve) Test..."
           rm -f .setup/enabled-services.yaml
           # Inputs: No to everything except Serve(y), then Proceed(y), CLI(n)
-          printf "n\nn\nn\nn\ny\nn\nn\nn\ny\nn\n" | ./init.sh --dev-mode > /dev/null 2>&1
+          printf "n\nn\nn\nn\ny\nn\nn\nn\ny\nn\n" | ./init.sh --dev-mode
           
           compare_yaml_logic ".github/ci-configs/expected/dev-mode-serve.yaml" "Dev Mode (Serve)" || exit 1
 
