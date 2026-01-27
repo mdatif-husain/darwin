@@ -231,6 +231,15 @@ jobs:
       # =========================================================================
       - name: Test init.sh
         run: |
+          # Verify yq is available
+          if ! command -v yq >/dev/null 2>&1; then
+            echo "❌ yq command not found!"
+            echo "Installing yq..."
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          fi
+          echo "✅ yq version: $(yq --version)"
+
           # Define logic to compare YAMLs logically (ignoring comments/dates)
           compare_yaml_logic() {
               local expected="$1"
@@ -322,15 +331,50 @@ jobs:
       - name: Deploy CI test service (start.sh)
         run: |
           echo "🚀 Deploying CI test service via start.sh with --ci-test flag..."
+
+          # 1. Start a background process to monitor pods every 30 seconds
+          (
+            echo "📊 Starting background pod monitor..."
+            while true; do
+              sleep 30
+              echo ""
+              echo "⏳ [$(date +%H:%M:%S)] Deployment still in progress... Current Pod Status:"
+              
+              # Show all pods in darwin namespace
+              # Columns: NAME, READY, STATUS, RESTARTS, AGE
+              kubectl get pods -n darwin --no-headers 2>/dev/null | awk '{print "      " $1 "  " $2 "  " $3 "  (Restarts: " $4 ")"}' || echo "      (No pods created yet)"
+              
+              # If any pod is not Running/Completed, show a warning
+              NOT_READY=$(kubectl get pods -n darwin --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null)
+              if [ ! -z "$NOT_READY" ]; then
+                echo "      ⚠️  Waiting for pods to become ready..."
+              fi
+              echo ""
+            done
+          ) &
+          MONITOR_PID=$!
+
+          # 2. Run the actual deployment command
+          # We use 'set +e' to capture the exit code manually, ensuring we kill the monitor
+          set +e
+          ./start.sh --ci-test 2>&1 | tee /tmp/start_deploy.log
+          DEPLOY_EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          # 3. Kill the background monitor immediately after start.sh finishes
+          kill $MONITOR_PID 2>/dev/null || true
           
-          # start.sh --ci-test:
-          # - Sources .setup/config.env which contains KUBECONFIG
-          # - Uses .github/ci-configs/test-enabled-services.yaml for service config
-          # - Uses .github/ci-configs/test-helm-values/ for Helm values
-          # - Deploys ONLY ci-test-service via helm
-          ./start.sh --ci-test
-          
-          echo "✅ Deployment completed via start.sh"
+          echo "✅ Deployment process finished with exit code $DEPLOY_EXIT_CODE"
+
+          # 4. Fail the step if start.sh failed
+          if [ $DEPLOY_EXIT_CODE -ne 0 ]; then
+            echo "❌ Deployment Failed. Final Pod Status:"
+            kubectl get pods -n darwin -o wide
+            echo ""
+            echo "=== Recent Events ==="
+            kubectl get events -n darwin --sort-by='.lastTimestamp' | tail -n 15
+            exit 1
+          fi
 
       - name: Assert pod running
         run: |
