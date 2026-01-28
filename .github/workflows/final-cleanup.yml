@@ -19,10 +19,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            .github
-          sparse-checkout-cone-mode: false
 
       - name: Runner identity (debug)
         run: |
