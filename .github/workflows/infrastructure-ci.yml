@@ -18,8 +18,22 @@ on:
       # Service files - infrastructure runs first for any service change
       - "ml-serve-app/**"
       - "artifact-builder/**"
+      - "darwin-workflow/**"
+      - "chronos/**"
+      - "darwin-compute/**"
+      - "darwin-cluster-manager/**"
+      - "darwin-catalog/**"
+      - "mlflow/**"
+      - "workspace/**"
       - ".github/workflows/ml-serve-ci.yml"
       - ".github/workflows/artifact-builder-ci.yml"
+      - ".github/workflows/workflow-ci.yml"
+      - ".github/workflows/chronos-ci.yml"
+      - ".github/workflows/compute-ci.yml"
+      - ".github/workflows/darwin-mlflow-ci.yml"
+      - ".github/workflows/workspace-ci.yml"
+      - ".github/workflows/catalog-ci.yml"
+      - ".github/workflows/darwin-cluster-manager-ci.yml"
   workflow_call: # Allow other workflows to call this
   workflow_dispatch: # Allow manual triggering
 
@@ -33,6 +47,13 @@ jobs:
     outputs:
       ml_serve: ${{ steps.filter.outputs.ml_serve }}
       artifact_builder: ${{ steps.filter.outputs.artifact_builder }}
+      workflow: ${{ steps.filter.outputs.workflow }}
+      chronos: ${{ steps.filter.outputs.chronos }}
+      compute: ${{ steps.filter.outputs.compute }}
+      mlflow: ${{ steps.filter.outputs.mlflow }}
+      workspace: ${{ steps.filter.outputs.workspace }}
+      catalog: ${{ steps.filter.outputs.catalog }}
+      cluster_manager: ${{ steps.filter.outputs.cluster_manager }}
       infra: ${{ steps.filter.outputs.infra }}
     steps:
       - name: Checkout repository
@@ -59,6 +80,27 @@ jobs:
             artifact_builder:
               - artifact-builder/**
               - .github/workflows/artifact-builder-ci.yml
+            workflow:
+              - darwin-workflow/**
+              - .github/workflows/workflow-ci.yml
+            chronos:
+              - chronos/**
+              - .github/workflows/chronos-ci.yml
+            compute:
+              - darwin-compute/**
+              - .github/workflows/compute-ci.yml
+            mlflow:
+              - mlflow/**
+              - .github/workflows/darwin-mlflow-ci.yml
+            workspace:
+              - workspace/**
+              - .github/workflows/workspace-ci.yml
+            catalog:
+              - darwin-catalog/**
+              - .github/workflows/catalog-ci.yml
+            cluster_manager:
+              - darwin-cluster-manager/**
+              - .github/workflows/darwin-cluster-manager-ci.yml
 
       - name: Log detected changes
         run: |
@@ -66,6 +108,13 @@ jobs:
           echo "   Infrastructure: ${{ steps.filter.outputs.infra }}"
           echo "   ML Serve App: ${{ steps.filter.outputs.ml_serve }}"
           echo "   Artifact Builder: ${{ steps.filter.outputs.artifact_builder }}"
+          echo "   Workflow: ${{ steps.filter.outputs.workflow }}"
+          echo "   Chronos: ${{ steps.filter.outputs.chronos }}"
+          echo "   Compute: ${{ steps.filter.outputs.compute }}"
+          echo "   MLflow: ${{ steps.filter.outputs.mlflow }}"
+          echo "   Workspace: ${{ steps.filter.outputs.workspace }}"
+          echo "   Catalog: ${{ steps.filter.outputs.catalog }}"
+          echo "   Cluster Manager: ${{ steps.filter.outputs.cluster_manager }}"
 
   # ============================================================================
   # INFRASTRUCTURE VALIDATION
@@ -523,6 +572,55 @@ jobs:
     uses: ./.github/workflows/artifact-builder-ci.yml
     secrets: inherit
 
+  workflow-ci:
+    name: Darwin Workflow CI
+    needs: [detect-changes, cluster-test]
+    if: needs.detect-changes.outputs.workflow == 'true'
+    uses: ./.github/workflows/workflow-ci.yml
+    secrets: inherit
+
+  chronos-ci:
+    name: Darwin Chronos CI
+    needs: [detect-changes, cluster-test]
+    if: needs.detect-changes.outputs.chronos == 'true'
+    uses: ./.github/workflows/chronos-ci.yml
+    secrets: inherit
+
+  compute-ci:
+    name: Darwin Compute CI
+    needs: [detect-changes, cluster-test]
+    if: needs.detect-changes.outputs.compute == 'true'
+    uses: ./.github/workflows/compute-ci.yml
+    secrets: inherit
+
+  darwin-mlflow-ci:
+    name: Darwin MLflow CI
+    needs: [detect-changes, cluster-test]
+    if: needs.detect-changes.outputs.mlflow == 'true'
+    uses: ./.github/workflows/darwin-mlflow-ci.yml
+    secrets: inherit
+
+  workspace-ci:
+    name: Darwin Workspace CI
+    needs: [detect-changes, cluster-test]
+    if: needs.detect-changes.outputs.workspace == 'true'
+    uses: ./.github/workflows/workspace-ci.yml
+    secrets: inherit
+
+  catalog-ci:
+    name: Darwin Catalog CI
+    needs: [detect-changes, cluster-test]
+    if: needs.detect-changes.outputs.catalog == 'true'
+    uses: ./.github/workflows/catalog-ci.yml
+    secrets: inherit
+
+  cluster-manager-ci:
+    name: Darwin Cluster Manager CI
+    needs: [detect-changes, cluster-test]
+    if: needs.detect-changes.outputs.cluster_manager == 'true'
+    uses: ./.github/workflows/darwin-cluster-manager-ci.yml
+    secrets: inherit
+
   # ============================================================================
   # FINAL CLEANUP - Runs after all CIs complete (even if they fail)
   # ============================================================================
@@ -532,9 +630,13 @@ jobs:
       - cluster-test
       - ml-serve-ci
       - artifact-builder-ci
-      # Add future service CIs here:
-      # - darwin-workflow-ci
-      # - chronos-ci
+      - workflow-ci
+      - chronos-ci
+      - compute-ci
+      - darwin-mlflow-ci
+      - workspace-ci
+      - catalog-ci
+      - cluster-manager-ci
     if: always() # Run even if any previous job failed or was skipped
     uses: ./.github/workflows/final-cleanup.yml
     secrets: inherit
