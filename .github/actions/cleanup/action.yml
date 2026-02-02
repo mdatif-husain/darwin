@@ -42,6 +42,10 @@ inputs:
     description: "Kubernetes namespace for deployment deletion"
     required: false
     default: "darwin"
+  uninstall_helm_release:
+    description: "Uninstall the entire Helm release before cleanup"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -51,6 +55,15 @@ runs:
       run: |
         echo "🧹 Killing any port-forwards..."
         pkill -f "kubectl port-forward" || true
+
+    - name: Uninstall Helm release
+      if: inputs.uninstall_helm_release == 'true'
+      shell: bash
+      run: |
+        echo "🧹 Uninstalling Helm release 'darwin'..."
+        helm uninstall darwin -n ${{ inputs.namespace }} --ignore-not-found --wait || true
+        kubectl delete job -n ${{ inputs.namespace }} -l app.kubernetes.io/instance=darwin --ignore-not-found || true
+        echo "✅ Helm release uninstalled"
 
     - name: Delete service deployment
       if: inputs.delete_deployment == 'true' && inputs.service_name != ''

@@ -116,6 +116,19 @@ jobs:
           echo "🔨 Running setup.sh..."
           ./setup.sh -y -d
 
+      - name: Clean up previous deployment
+        run: |
+          echo "🧹 Cleaning up previous deployment state..."
+          # Uninstall existing helm release (handles failed/deployed state)
+          helm uninstall darwin -n darwin --ignore-not-found --wait || true
+          # Delete the datastore-health-check Job explicitly (immutable, must be deleted)
+          kubectl delete job darwin-datastore-health-check -n darwin --ignore-not-found || true
+          # Delete any leftover datastore-health-check pods
+          kubectl delete pods -n darwin -l app.kubernetes.io/component=datastore-health-check --ignore-not-found || true
+          # Wait for cleanup to complete
+          sleep 5
+          echo "✅ Previous deployment cleaned up"
+
       - name: Deploy services
         run: |
           echo "🚀 Running start.sh to deploy services..."
@@ -356,10 +369,21 @@ jobs:
         with:
           clean: false # Preserve kind/shared-storage to avoid permission errors
 
-      - name: Cleanup
+      - name: Cleanup mlflow
         uses: ./.github/actions/cleanup
         with:
-          service_name: "mlflow"
+          service_name: "darwin-mlflow"
+          delete_cluster: "false"
+          delete_deployment: "true"
+          prune_darwin_images: "true"
+          prune_volumes: "false"
+          prune_containers: "false"
+          workspace_dir: ${{ github.workspace }}
+
+      - name: Cleanup mlflow-app
+        uses: ./.github/actions/cleanup
+        with:
+          service_name: "darwin-mlflow-app"
           delete_cluster: "false"
           delete_deployment: "true"
           prune_darwin_images: "true"

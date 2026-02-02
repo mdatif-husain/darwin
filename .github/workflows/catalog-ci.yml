@@ -122,6 +122,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Install Maven (if not present)
+        run: |
+          if ! command -v mvn &> /dev/null; then
+            echo "Maven not found, installing..."
+            cd /tmp
+            curl -sL https://archive.apache.org/dist/maven/maven-3/3.9.6/binaries/apache-maven-3.9.6-bin.tar.gz | tar xz
+            sudo mv apache-maven-3.9.6 /opt/maven
+            echo "/opt/maven/bin" >> $GITHUB_PATH
+            export PATH="/opt/maven/bin:$PATH"
+          fi
+          mvn --version
+        working-directory: /
+
       - name: Setup cluster
         uses: ./.github/actions/setup-cluster
         with:
@@ -139,6 +159,19 @@ jobs:
         run: |
           echo "🔨 Running setup.sh..."
           ./setup.sh -y -d
+
+      - name: Clean up previous deployment
+        run: |
+          echo "🧹 Cleaning up previous deployment state..."
+          # Uninstall existing helm release (handles failed/deployed state)
+          helm uninstall darwin -n darwin --ignore-not-found --wait || true
+          # Delete the datastore-health-check Job explicitly (immutable, must be deleted)
+          kubectl delete job darwin-datastore-health-check -n darwin --ignore-not-found || true
+          # Delete any leftover datastore-health-check pods
+          kubectl delete pods -n darwin -l app.kubernetes.io/component=datastore-health-check --ignore-not-found || true
+          # Wait for cleanup to complete
+          sleep 5
+          echo "✅ Previous deployment cleaned up"
 
       - name: Deploy services
         run: |
@@ -322,7 +355,7 @@ jobs:
       - name: Cleanup
         uses: ./.github/actions/cleanup
         with:
-          service_name: "catalog"
+          service_name: "darwin-catalog"
           delete_cluster: "false"
           delete_deployment: "true"
           prune_darwin_images: "true"
