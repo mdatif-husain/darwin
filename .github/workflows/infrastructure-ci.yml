@@ -30,7 +30,7 @@ on:
       - ".github/workflows/workflow-ci.yml"
       - ".github/workflows/chronos-ci.yml"
       - ".github/workflows/compute-ci.yml"
-      - ".github/workflows/darwin-mlflow-ci.yml"
+      - ".github/workflows/mlflow-ci.yml"
       - ".github/workflows/workspace-ci.yml"
       - ".github/workflows/catalog-ci.yml"
       - ".github/workflows/darwin-cluster-manager-ci.yml"
@@ -91,7 +91,7 @@ jobs:
               - .github/workflows/compute-ci.yml
             mlflow:
               - mlflow/**
-              - .github/workflows/darwin-mlflow-ci.yml
+              - .github/workflows/mlflow-ci.yml
             workspace:
               - workspace/**
               - .github/workflows/workspace-ci.yml
@@ -597,7 +597,7 @@ jobs:
     name: Darwin MLflow CI
     needs: [detect-changes, cluster-test]
     if: needs.detect-changes.outputs.mlflow == 'true'
-    uses: ./.github/workflows/darwin-mlflow-ci.yml
+    uses: ./.github/workflows/mlflow-ci.yml
     secrets: inherit
 
   workspace-ci:
