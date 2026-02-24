@@ -81,15 +81,16 @@ jobs:
           fi
         continue-on-error: true
 
-  deploy-and-healthcheck:
-    name: Deployment & Health Check
+  e2e-execution:
+    name: End-to-End Execution
     runs-on: [self-hosted, Linux, X64, darwin]
     needs: [lint, unit-tests]
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       KUBECONFIG: ./.setup/kindkubeconfig.yaml
 
     steps:
+      # --- SETUP ---
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -104,11 +105,11 @@ jobs:
         with:
           kubeconfig_path: ./.setup/kindkubeconfig.yaml
 
+      # --- DEPLOY ---
       - name: Initialize configuration
         run: |
           echo "📋 Running init.sh..."
           rm -f .setup/enabled-services.yaml
-          # Enable Serve only (ml-serve-app + artifact-builder)
           printf "n\nn\nn\nn\ny\nn\nn\nn\ny\nn\n" | ./init.sh --dev-mode
           cat .setup/enabled-services.yaml
 
@@ -120,13 +121,9 @@ jobs:
       - name: Clean up previous deployment
         run: |
           echo "🧹 Cleaning up previous deployment state..."
-          # Uninstall existing helm release (handles failed/deployed state)
           helm uninstall darwin -n darwin --ignore-not-found --wait || true
-          # Delete the datastore-health-check Job explicitly (immutable, must be deleted)
           kubectl delete job darwin-datastore-health-check -n darwin --ignore-not-found || true
-          # Delete any leftover datastore-health-check pods
           kubectl delete pods -n darwin -l app.kubernetes.io/component=datastore-health-check --ignore-not-found || true
-          # Wait for cleanup to complete
           sleep 5
           echo "✅ Previous deployment cleaned up"
 
@@ -134,7 +131,6 @@ jobs:
         run: |
           echo "🚀 Running start.sh to deploy services..."
 
-          # Start a background process to periodically show status and keep runner alive
           (
             while true; do
               sleep 30
@@ -149,13 +145,11 @@ jobs:
           ) &
           STATUS_MONITOR_PID=$!
 
-          # Capture output and exit code
-          set +e  # Don't exit on error immediately, we want to capture diagnostics
+          set +e
           ./start.sh 2>&1 | tee /tmp/start.sh.log
           START_EXIT_CODE=${PIPESTATUS[0]}
           set -e
 
-          # Stop the status monitor
           kill $STATUS_MONITOR_PID 2>/dev/null || true
 
           if [ $START_EXIT_CODE -ne 0 ]; then
@@ -235,7 +229,6 @@ jobs:
         run: |
           echo "🏥 Testing Artifact Builder healthcheck..."
 
-          # Wait for ingress
           max_attempts=30
           attempt=0
           while [ $attempt -lt $max_attempts ]; do
@@ -277,38 +270,16 @@ jobs:
             exit 1
           fi
 
-  integration-tests:
-    name: Integration Tests
-    runs-on: [self-hosted, Linux, X64, darwin]
-    needs: [deploy-and-healthcheck]
-    env:
-      KUBECONFIG: ./.setup/kindkubeconfig.yaml
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          clean: false # Preserve kind/shared-storage to avoid permission errors
-
+      # --- INTEGRATION TESTS ---
       - name: Run integration tests
         run: |
           echo "🧪 Running integration tests..."
           # TODO: Add actual integration tests here
-          # Example: pytest integration_tests/ -v
           echo "✅ Integration tests placeholder completed"
 
-  cleanup:
-    name: Cleanup
-    runs-on: [self-hosted, Linux, X64, darwin]
-    if: always()
-    needs: [integration-tests]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          clean: false # Preserve kind/shared-storage to avoid permission errors
-
+      # --- CLEANUP (always runs) ---
       - name: Cleanup
+        if: always()
         uses: ./.github/actions/cleanup
         with:
           service_name: "artifact-builder"
